@@ -15,3 +15,5 @@ BOARD = NUC123SD4AN0
 MCU  = cortex-m0
 # ARM version, CORTEX-M0/M1 are 6, CORTEX-M3/M4/M7 are 7
 ARMV = 6
+
+SRC += rgb_matrix_custom.c
