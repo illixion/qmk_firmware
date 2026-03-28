@@ -18,4 +18,7 @@ ARMV = 6
 
 SRC += rgb_matrix_custom.c
 
+EEPROM_DRIVER = wear_leveling
+WEAR_LEVELING_DRIVER = embedded_flash
+
 ALLOW_WARNINGS = yes
