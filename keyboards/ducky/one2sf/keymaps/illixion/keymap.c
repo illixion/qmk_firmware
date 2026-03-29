@@ -1,94 +1,30 @@
 #include QMK_KEYBOARD_H
 #include "os_detection.h"
-#include "raw_hid.h"
-
-#ifndef RAW_EPSIZE
-#define RAW_EPSIZE 32
-#endif
+#include "qmk_openrgb_direct.h"
 
 // --- Custom keycodes ---
 enum custom_keycodes {
     CMD_ESC_GRV = SAFE_RANGE
 };
 
-// --- Chroma HID passthrough ---
-// Protocol: 32-byte raw HID packets
-//   Command 0x01: Set LEDs  [0x01, start_index, count(max 9), R,G,B, R,G,B, ...]
-//   Command 0x02: Enable Chroma mode
-//   Command 0x03: Disable Chroma mode
-//   Command 0x04: Heartbeat (resets timeout)
-
-#define CHROMA_CMD_SET_LEDS  0x01
-#define CHROMA_CMD_ENABLE    0x02
-#define CHROMA_CMD_DISABLE   0x03
-#define CHROMA_CMD_HEARTBEAT 0x04
-
-#define CHROMA_TIMEOUT_MS    5000
-#define CHROMA_MAX_LEDS_PER_PACKET 9
-
-static bool    chroma_active = false;
-static uint32_t chroma_last_heartbeat = 0;
-static uint8_t chroma_colors[RGB_MATRIX_LED_COUNT][3]; // [i] = {R, G, B}
+// --- QMK Direct Protocol (QMKD) ---
+// Universal OpenRGB support via qmk_openrgb_direct.h
+// See protocol spec in that header for details.
 
 void raw_hid_receive(uint8_t *data, uint8_t length) {
     uint8_t response[RAW_EPSIZE];
     memset(response, 0, RAW_EPSIZE);
 
-    switch (data[0]) {
-        case CHROMA_CMD_SET_LEDS: {
-            uint8_t start = data[1];
-            uint8_t count = data[2];
-            if (count > CHROMA_MAX_LEDS_PER_PACKET) count = CHROMA_MAX_LEDS_PER_PACKET;
-            if (start + count > RGB_MATRIX_LED_COUNT) count = RGB_MATRIX_LED_COUNT - start;
-
-            for (uint8_t i = 0; i < count; i++) {
-                uint8_t idx = start + i;
-                chroma_colors[idx][0] = data[3 + i * 3];     // R
-                chroma_colors[idx][1] = data[3 + i * 3 + 1]; // G
-                chroma_colors[idx][2] = data[3 + i * 3 + 2]; // B
-            }
-            chroma_last_heartbeat = timer_read32();
-            response[0] = 0x01; // ACK
-            break;
-        }
-        case CHROMA_CMD_ENABLE:
-            chroma_active = true;
-            chroma_last_heartbeat = timer_read32();
-            memset(chroma_colors, 0, sizeof(chroma_colors));
-            response[0] = 0x02; // ACK
-            break;
-
-        case CHROMA_CMD_DISABLE:
-            chroma_active = false;
-            response[0] = 0x03; // ACK
-            break;
-
-        case CHROMA_CMD_HEARTBEAT:
-            chroma_last_heartbeat = timer_read32();
-            response[0] = 0x04; // ACK
-            response[1] = chroma_active ? 1 : 0;
-            break;
-
-        default:
-            response[0] = 0xFF; // Unknown command
-            break;
+    if (!qmkd_process_packet(data, length, response)) {
+        response[0] = QMKD_RSP_UNKNOWN;
     }
 
     raw_hid_send(response, RAW_EPSIZE);
 }
 
-// Override RGB matrix when Chroma is active
 bool rgb_matrix_indicators_advanced_user(uint8_t led_min, uint8_t led_max) {
-    if (!chroma_active) return false;
-
-    // Auto-disable if no heartbeat received
-    if (timer_elapsed32(chroma_last_heartbeat) > CHROMA_TIMEOUT_MS) {
-        chroma_active = false;
-        return false;
-    }
-
-    for (uint8_t i = led_min; i < led_max; i++) {
-        rgb_matrix_set_color(i, chroma_colors[i][0], chroma_colors[i][1], chroma_colors[i][2]);
+    if (qmkd_rgb_matrix_indicator(led_min, led_max)) {
+        return true;  // Host is controlling LEDs — skip local effects
     }
     return false;
 }

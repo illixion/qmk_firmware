@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-Aurora RGB -> Ducky One 2 SF HID Bridge
+Aurora RGB -> QMK Keyboard HID Bridge
 
 Reads per-key RGB data from Aurora's DeviceLedMap shared memory and forwards
-it to the Ducky One 2 SF keyboard via raw HID.
+it to a QMK keyboard via the QMK Direct Protocol (QMKD) over raw HID.
+
+NOTE: With QMKD v1.0, you can also use OpenRGB as the host instead of this
+script. Aurora -> OpenRGB -> keyboard is the recommended data flow. This
+script remains useful as a lightweight standalone bridge without OpenRGB.
 
 Why Aurora? Games like Cyberpunk 2077 use the native Razer Chroma SDK DLL
 (RzChromaSDK64.dll), NOT a REST API. Aurora intercepts those native DLL calls
@@ -19,12 +23,12 @@ Setup:
     3. Ensure "Razer Chroma SDK Service" (rzsdkservice.exe) is running
     4. Enable Razer (RGB.NET) device in Aurora's Device Manager
     5. Add a "Razer Chroma" layer to your Aurora profile for the game
-    6. Flash the Ducky firmware with RAW_ENABLE=yes
+    6. Flash the QMK firmware with qmk_openrgb_direct.h included
     7. Run this script, then launch your game
 
 Data flow:
     Game -> RzChromaSDK64.dll -> Razer SDK Service -> Aurora (reads shared mem)
-         -> Aurora DeviceLedMap (MMF) -> THIS SCRIPT -> Ducky raw HID
+         -> Aurora DeviceLedMap (MMF) -> THIS SCRIPT -> QMK raw HID
 """
 
 import sys
@@ -47,22 +51,28 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("chroma_bridge")
 
-# --- Ducky One 2 SF HID Config ---
-DUCKY_VID = 0x445B
-DUCKY_PID = 0x07AF
+# --- Default HID Config (Ducky One 2 SF) ---
+# Override with --vid/--pid for other keyboards
+DEFAULT_VID = 0x445B
+DEFAULT_PID = 0x07AF
 RAW_USAGE_PAGE = 0xFF60
 RAW_USAGE_ID = 0x61
 RAW_EPSIZE = 32
 
-# --- Chroma HID Protocol (keyboard firmware side) ---
-CMD_SET_LEDS  = 0x01
-CMD_ENABLE    = 0x02
-CMD_DISABLE   = 0x03
-CMD_HEARTBEAT = 0x04
-MAX_LEDS_PER_PACKET = 9
+# --- QMK Direct Protocol (QMKD) commands ---
+CMD_SET_LEDS      = 0x01
+CMD_ENABLE        = 0x02
+CMD_DISABLE       = 0x03
+CMD_HEARTBEAT     = 0x04
+CMD_GET_PROTOCOL  = 0x05
+CMD_GET_DEVICE    = 0x06
+CMD_GET_LED_MAP   = 0x07
+RSP_UNKNOWN       = 0xFF
 
-# --- LED count ---
-DUCKY_LED_COUNT = 69
+# --- Defaults (overridden by firmware query for QMKD v1+) ---
+DEFAULT_LED_COUNT = 69
+DEFAULT_MAX_LEDS_PER_PKT = 9
+DEFAULT_TIMEOUT_SEC = 5
 
 
 # =============================================================================
@@ -280,18 +290,24 @@ class AuroraMMFReader:
         time.sleep(timeout_ms / 1000.0)
         return True
 
-    def read_frame(self):
-        """Read a full frame of Ducky LED colors from the MMF.
+    def read_frame(self, aurora_to_led, led_count):
+        """Read a full frame of LED colors from the MMF.
+
+        Args:
+            aurora_to_led: dict mapping Aurora DeviceKeys enum -> LED index
+            led_count: total number of LEDs on the keyboard
 
         Returns:
-            list of DUCKY_LED_COUNT (R, G, B) tuples, or None on error.
+            list of led_count (R, G, B) tuples, or None on error.
         """
         if not self._mmf:
             return None
 
-        led_array = [(0, 0, 0)] * DUCKY_LED_COUNT
+        led_array = [(0, 0, 0)] * led_count
 
-        for aurora_key, ducky_idx in AURORA_TO_DUCKY.items():
+        for aurora_key, led_idx in aurora_to_led.items():
+            if led_idx >= led_count:
+                continue
             offset = MMF_HEADER_SIZE + aurora_key * MMF_COLOR_SIZE
             try:
                 self._mmf.seek(offset)
@@ -307,25 +323,33 @@ class AuroraMMFReader:
                 g = (g * a) // 255
                 b = (b * a) // 255
 
-            led_array[ducky_idx] = (r, g, b)
+            led_array[led_idx] = (r, g, b)
 
         return led_array
 
 
 # =============================================================================
-# Ducky One 2 SF raw HID communication (unchanged from previous version)
+# QMK keyboard raw HID communication
 # =============================================================================
 
-class DuckyHID:
-    """Manages raw HID communication with the Ducky One 2 SF."""
+class QMKKeyboardHID:
+    """Manages raw HID communication with a QMK keyboard using QMKD protocol."""
 
-    def __init__(self):
+    def __init__(self, vid, pid):
+        self.vid = vid
+        self.pid = pid
         self.device = None
         self._lock = threading.Lock()
 
+        # Device capabilities (defaults, overridden by firmware query)
+        self.led_count = DEFAULT_LED_COUNT
+        self.max_leds_per_pkt = DEFAULT_MAX_LEDS_PER_PKT
+        self.timeout_sec = DEFAULT_TIMEOUT_SEC
+        self.protocol_version = None  # (major, minor) or None for legacy
+
     def connect(self):
-        """Find and open the Ducky raw HID interface."""
-        device_interfaces = hid.enumerate(DUCKY_VID, DUCKY_PID)
+        """Find and open the QMK raw HID interface."""
+        device_interfaces = hid.enumerate(self.vid, self.pid)
         raw_interfaces = [
             i for i in device_interfaces
             if i.get("usage_page") == RAW_USAGE_PAGE
@@ -334,8 +358,8 @@ class DuckyHID:
 
         if not raw_interfaces:
             log.warning(
-                "Ducky One 2 SF raw HID interface not found "
-                "(VID=0x%04X PID=0x%04X)", DUCKY_VID, DUCKY_PID,
+                "QMK keyboard raw HID interface not found "
+                "(VID=0x%04X PID=0x%04X)", self.vid, self.pid,
             )
             log.info("Available devices:")
             for d in device_interfaces:
@@ -354,7 +378,35 @@ class DuckyHID:
             self.device.get_manufacturer_string(),
             self.device.get_product_string(),
         )
+
+        # Probe for QMKD v1+ protocol
+        self._probe_protocol()
+
         return True
+
+    def _probe_protocol(self):
+        """Probe the keyboard for QMKD protocol support.
+
+        If the firmware implements QMKD v1+, query device capabilities.
+        Otherwise, fall back to hardcoded defaults (legacy v0 protocol).
+        """
+        resp = self._send([CMD_GET_PROTOCOL])
+        if (resp and len(resp) >= 7 and resp[0] == CMD_GET_PROTOCOL
+                and resp[1:5] == [ord('Q'), ord('M'), ord('K'), ord('D')]):
+            major, minor = resp[5], resp[6]
+            self.protocol_version = (major, minor)
+            log.info("QMKD protocol v%d.%d detected", major, minor)
+
+            # Query device info
+            resp = self._send([CMD_GET_DEVICE])
+            if resp and resp[0] == CMD_GET_DEVICE:
+                self.led_count = resp[1]
+                self.max_leds_per_pkt = resp[4] if resp[4] > 0 else DEFAULT_MAX_LEDS_PER_PKT
+                self.timeout_sec = resp[5] if resp[5] > 0 else DEFAULT_TIMEOUT_SEC
+                log.info("Device: %d LEDs, %d/pkt, %ds timeout",
+                         self.led_count, self.max_leds_per_pkt, self.timeout_sec)
+        else:
+            log.info("Legacy protocol (no QMKD probe response) — using defaults")
 
     def disconnect(self):
         if self.device:
@@ -371,28 +423,29 @@ class DuckyHID:
         with self._lock:
             try:
                 self.device.write(bytes(report))
-                return self.device.read(RAW_EPSIZE, 100)
+                return list(self.device.read(RAW_EPSIZE, 200))
             except Exception as e:
                 log.error("HID error: %s", e)
                 return None
 
-    def enable_chroma(self):
+    def enable(self):
         return self._send([CMD_ENABLE])
 
-    def disable_chroma(self):
+    def disable(self):
         return self._send([CMD_DISABLE])
 
     def heartbeat(self):
         return self._send([CMD_HEARTBEAT])
 
     def set_all_leds(self, led_array):
-        """Send all 69 LED colors at once (full frame).
+        """Send all LED colors at once (full frame).
 
         Args:
-            led_array: list of 69 (R, G, B) tuples
+            led_array: list of (R, G, B) tuples, length = self.led_count
         """
-        for start in range(0, len(led_array), MAX_LEDS_PER_PACKET):
-            end = min(start + MAX_LEDS_PER_PACKET, len(led_array))
+        max_pkt = self.max_leds_per_pkt
+        for start in range(0, len(led_array), max_pkt):
+            end = min(start + max_pkt, len(led_array))
             batch = led_array[start:end]
             data = [CMD_SET_LEDS, start, len(batch)]
             for r, g, b in batch:
@@ -413,15 +466,23 @@ def frames_are_equal(a, b):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Aurora RGB -> Ducky One 2 SF Chroma Bridge",
+        description="Aurora RGB -> QMK Keyboard Bridge (QMKD protocol)",
+    )
+    parser.add_argument(
+        "--vid", type=lambda x: int(x, 0), default=DEFAULT_VID,
+        help="USB Vendor ID (default: 0x%04X)" % DEFAULT_VID,
+    )
+    parser.add_argument(
+        "--pid", type=lambda x: int(x, 0), default=DEFAULT_PID,
+        help="USB Product ID (default: 0x%04X)" % DEFAULT_PID,
     )
     parser.add_argument(
         "--poll-ms", type=int, default=50,
         help="Event wait timeout / poll interval in ms (default: 50 = ~20 fps)",
     )
     parser.add_argument(
-        "--heartbeat-interval", type=float, default=2.0,
-        help="Seconds between keyboard heartbeat packets (default: 2.0)",
+        "--heartbeat-interval", type=float, default=None,
+        help="Seconds between heartbeat packets (default: auto from firmware)",
     )
     parser.add_argument(
         "--retry-interval", type=float, default=5.0,
@@ -429,22 +490,28 @@ def main():
     )
     args = parser.parse_args()
 
-    log.info("Ducky One 2 SF Aurora Chroma Bridge")
-    log.info("VID=0x%04X PID=0x%04X", DUCKY_VID, DUCKY_PID)
+    log.info("Aurora -> QMK Keyboard Bridge (QMKD)")
+    log.info("VID=0x%04X PID=0x%04X", args.vid, args.pid)
 
     if os.name != "nt":
         log.error("This script requires Windows (named MMF + event handles).")
         sys.exit(1)
 
     # --- Connect to keyboard ---
-    ducky = DuckyHID()
-    if not ducky.connect():
+    kb = QMKKeyboardHID(args.vid, args.pid)
+    if not kb.connect():
         log.error("Failed to connect to keyboard. Is it plugged in?")
-        log.error("Make sure the firmware has RAW_ENABLE=yes and is flashed.")
+        log.error("Make sure the firmware has RAW_ENABLE=yes and qmk_openrgb_direct.h.")
         sys.exit(1)
 
-    ducky.enable_chroma()
-    log.info("Keyboard Chroma mode enabled")
+    # Use firmware-reported timeout for heartbeat interval, or user override
+    heartbeat_interval = args.heartbeat_interval
+    if heartbeat_interval is None:
+        heartbeat_interval = max(kb.timeout_sec / 2.0, 1.0)
+    log.info("Heartbeat interval: %.1fs", heartbeat_interval)
+
+    kb.enable()
+    log.info("Host-controlled mode enabled (%d LEDs)", kb.led_count)
 
     # --- Connect to Aurora MMF (retry loop) ---
     aurora = AuroraMMFReader()
@@ -452,8 +519,13 @@ def main():
         log.info("Waiting for Aurora... (retrying in %.0fs)", args.retry_interval)
         time.sleep(args.retry_interval)
 
-    log.info("Bridge active — reading Aurora DeviceLedMap, forwarding to Ducky")
+    log.info("Bridge active — reading Aurora DeviceLedMap, forwarding to keyboard")
     log.info("Press Ctrl+C to stop")
+
+    # Use the hardcoded Aurora -> LED index mapping.
+    # This mapping is specific to the Ducky One 2 SF 65% layout.
+    # For other keyboards, update AURORA_TO_DUCKY or use OpenRGB instead.
+    aurora_to_led = AURORA_TO_DUCKY
 
     prev_frame = None
     last_heartbeat = time.monotonic()
@@ -466,14 +538,14 @@ def main():
             # Wait for Aurora to signal a new frame (or poll timeout).
             aurora.wait_for_update(timeout_ms=args.poll_ms)
 
-            # Send periodic heartbeat to keep keyboard in Chroma mode.
+            # Send periodic heartbeat to keep host-controlled mode alive.
             now = time.monotonic()
-            if now - last_heartbeat >= args.heartbeat_interval:
-                ducky.heartbeat()
+            if now - last_heartbeat >= heartbeat_interval:
+                kb.heartbeat()
                 last_heartbeat = now
 
             # Read the current frame from shared memory.
-            frame = aurora.read_frame()
+            frame = aurora.read_frame(aurora_to_led, kb.led_count)
             if frame is None:
                 continue
 
@@ -482,7 +554,7 @@ def main():
                 frames_skipped += 1
                 continue
 
-            ducky.set_all_leds(frame)
+            kb.set_all_leds(frame)
             prev_frame = frame
             frames_sent += 1
 
@@ -503,8 +575,8 @@ def main():
     finally:
         log.info("Shutting down...")
         aurora.disconnect()
-        ducky.disable_chroma()
-        ducky.disconnect()
+        kb.disable()
+        kb.disconnect()
         log.info("Done")
 
 
