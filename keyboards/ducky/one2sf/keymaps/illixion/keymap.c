@@ -93,6 +93,15 @@ bool rgb_matrix_indicators_advanced_user(uint8_t led_min, uint8_t led_max) {
     return false;
 }
 
+// --- Suspend: turn off LEDs when host sleeps ---
+void suspend_power_down_user(void) {
+    rgb_matrix_set_suspend_state(true);
+}
+
+void suspend_wakeup_init_user(void) {
+    rgb_matrix_set_suspend_state(false);
+}
+
 // --- OS Detection: auto-swap Alt/GUI ---
 bool process_detected_host_os_user(os_variant_t detected_os) {
     switch (detected_os) {
