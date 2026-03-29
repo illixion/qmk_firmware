@@ -60,6 +60,7 @@ jobs:
             qtchooser \
             qt5-qmake \
             qtbase5-dev-tools \
+            qttools5-dev-tools \
             libqt5svg5-dev \
             libusb-1.0-0-dev \
             libhidapi-dev \
