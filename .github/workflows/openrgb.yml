@@ -1,0 +1,230 @@
+#-----------------------------------------------------------#
+# OpenRGB Build with QMK Direct Protocol Controller         #
+#                                                           #
+# Builds OpenRGB from source with the QMKDirect controller  #
+# injected into the Controllers directory, producing        #
+# release binaries for Linux, Windows, and macOS.           #
+#                                                           #
+# Triggered on changes to openrgb_controller/ or manually.  #
+#-----------------------------------------------------------#
+
+name: OpenRGB Build
+
+on:
+  push:
+    paths:
+      - 'keyboards/ducky/one2sf/keymaps/illixion/openrgb_controller/**'
+      - '.github/workflows/openrgb.yml'
+  pull_request:
+    paths:
+      - 'keyboards/ducky/one2sf/keymaps/illixion/openrgb_controller/**'
+      - '.github/workflows/openrgb.yml'
+  workflow_dispatch:
+
+env:
+  OPENRGB_REPO: https://github.com/CalcProgrammer1/OpenRGB.git
+  OPENRGB_BRANCH: master
+  CONTROLLER_SRC: keyboards/ducky/one2sf/keymaps/illixion/openrgb_controller
+  CONTROLLER_DST: Controllers/QMKDirectController
+
+jobs:
+  #---------------------------------------------------------#
+  # Linux AppImage (amd64, Qt5)                             #
+  #---------------------------------------------------------#
+  linux:
+    name: Linux amd64 AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout QMK fork
+        uses: actions/checkout@v4
+        with:
+          path: qmk
+
+      - name: Clone OpenRGB
+        run: git clone --depth 1 --branch ${{ env.OPENRGB_BRANCH }} ${{ env.OPENRGB_REPO }} OpenRGB
+
+      - name: Inject QMKDirect controller
+        run: |
+          mkdir -p OpenRGB/${{ env.CONTROLLER_DST }}
+          cp qmk/${{ env.CONTROLLER_SRC }}/*.h   OpenRGB/${{ env.CONTROLLER_DST }}/
+          cp qmk/${{ env.CONTROLLER_SRC }}/*.cpp OpenRGB/${{ env.CONTROLLER_DST }}/
+          echo "Injected controller files:"
+          ls -la OpenRGB/${{ env.CONTROLLER_DST }}/
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            qtbase5-dev \
+            qtchooser \
+            qt5-qmake \
+            qtbase5-dev-tools \
+            libqt5svg5-dev \
+            libusb-1.0-0-dev \
+            libhidapi-dev \
+            libmbedtls-dev \
+            pkg-config
+
+      - name: Build OpenRGB
+        working-directory: OpenRGB
+        run: |
+          qmake OpenRGB.pro CONFIG+=release
+          make -j$(nproc)
+
+      - name: Package
+        working-directory: OpenRGB
+        run: |
+          mkdir -p release
+          cp OpenRGB release/
+          cp 60-openrgb.rules release/ 2>/dev/null || true
+          cp README.md release/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenRGB-Linux-amd64-QMKDirect
+          path: OpenRGB/release/
+          retention-days: 30
+
+  #---------------------------------------------------------#
+  # Windows 64-bit (Qt6, MSVC 2022)                         #
+  #---------------------------------------------------------#
+  windows:
+    name: Windows 64-bit
+    runs-on: windows-2022
+    steps:
+      - name: Checkout QMK fork
+        uses: actions/checkout@v4
+        with:
+          path: qmk
+
+      - name: Clone OpenRGB
+        run: git clone --depth 1 --branch ${{ env.OPENRGB_BRANCH }} ${{ env.OPENRGB_REPO }} OpenRGB
+
+      - name: Inject QMKDirect controller
+        shell: bash
+        run: |
+          mkdir -p OpenRGB/${{ env.CONTROLLER_DST }}
+          cp qmk/${{ env.CONTROLLER_SRC }}/*.h   OpenRGB/${{ env.CONTROLLER_DST }}/
+          cp qmk/${{ env.CONTROLLER_SRC }}/*.cpp OpenRGB/${{ env.CONTROLLER_DST }}/
+          echo "Injected controller files:"
+          ls -la OpenRGB/${{ env.CONTROLLER_DST }}/
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build OpenRGB
+        working-directory: OpenRGB
+        shell: cmd
+        run: |
+          qmake OpenRGB.pro CONFIG-=debug_and_release CONFIG+=release
+          nmake
+
+      - name: Deploy Qt DLLs
+        working-directory: OpenRGB
+        shell: cmd
+        run: |
+          windeployqt --no-patchqt --no-quick-import --no-translations --no-system-d3d-compiler --no-compiler-runtime --no-opengl-sw --no-network release\
+
+      - name: Copy dependency DLLs
+        working-directory: OpenRGB
+        shell: bash
+        run: |
+          # Copy bundled dependency DLLs if they exist
+          cp dependencies/libusb-1.0.27/VS2019/MS64/dll/libusb-1.0.dll release/ 2>/dev/null || true
+          cp dependencies/hidapi-win/x64/hidapi.dll release/ 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenRGB-Windows-64bit-QMKDirect
+          path: OpenRGB/release/
+          retention-days: 30
+
+  #---------------------------------------------------------#
+  # macOS ARM64 (Qt6, Homebrew)                             #
+  #---------------------------------------------------------#
+  macos:
+    name: macOS ARM64
+    runs-on: macos-14
+    steps:
+      - name: Checkout QMK fork
+        uses: actions/checkout@v4
+        with:
+          path: qmk
+
+      - name: Clone OpenRGB
+        run: git clone --depth 1 --branch ${{ env.OPENRGB_BRANCH }} ${{ env.OPENRGB_REPO }} OpenRGB
+
+      - name: Inject QMKDirect controller
+        run: |
+          mkdir -p OpenRGB/${{ env.CONTROLLER_DST }}
+          cp qmk/${{ env.CONTROLLER_SRC }}/*.h   OpenRGB/${{ env.CONTROLLER_DST }}/
+          cp qmk/${{ env.CONTROLLER_SRC }}/*.cpp OpenRGB/${{ env.CONTROLLER_DST }}/
+          echo "Injected controller files:"
+          ls -la OpenRGB/${{ env.CONTROLLER_DST }}/
+
+      - name: Install dependencies
+        run: |
+          brew install qt@6 libusb hidapi mbedtls@3
+
+      - name: Build OpenRGB
+        working-directory: OpenRGB
+        run: |
+          export PATH="$(brew --prefix qt@6)/bin:$PATH"
+          qmake OpenRGB.pro CONFIG+=release
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Package app bundle
+        working-directory: OpenRGB
+        run: |
+          $(brew --prefix qt@6)/bin/macdeployqt OpenRGB.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenRGB-macOS-ARM64-QMKDirect
+          path: OpenRGB/OpenRGB.app
+          retention-days: 30
+
+  #---------------------------------------------------------#
+  # Create release (only on tag push)                       #
+  #---------------------------------------------------------#
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package artifacts
+        run: |
+          cd artifacts
+          for dir in */; do
+            name="${dir%/}"
+            zip -r "../${name}.zip" "$dir"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: '*.zip'
+          generate_release_notes: true
