@@ -77,7 +77,7 @@ jobs:
         working-directory: OpenRGB
         run: |
           mkdir -p release
-          cp OpenRGB release/
+          cp openrgb release/
           cp 60-openrgb.rules release/ 2>/dev/null || true
           cp README.md release/
 
