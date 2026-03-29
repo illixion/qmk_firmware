@@ -17,6 +17,9 @@
 
 #include <string>
 #include <vector>
+#include <thread>
+#include <atomic>
+#include <mutex>
 #include <hidapi.h>
 #include "RGBController.h"
 
@@ -94,11 +97,25 @@ public:
                                unsigned int led_count,
                                unsigned int max_per_pkt);
 
+    /*-----------------------------------------------------*\
+    | Heartbeat thread — keeps firmware in host mode even    |
+    | when OpenRGB is idle (no active color updates).        |
+    \*-----------------------------------------------------*/
+    void            StartHeartbeatThread(unsigned int interval_ms);
+    void            StopHeartbeatThread();
+
 private:
     hid_device*     dev;
     std::string     location;
     std::string     device_name;
 
+    std::mutex      dev_mutex;
+
+    std::thread     heartbeat_thread;
+    std::atomic<bool> heartbeat_running;
+
     bool            SendPacket(unsigned char* data, unsigned int length,
                                unsigned char* response);
+
+    void            HeartbeatThreadFunc(unsigned int interval_ms);
 };

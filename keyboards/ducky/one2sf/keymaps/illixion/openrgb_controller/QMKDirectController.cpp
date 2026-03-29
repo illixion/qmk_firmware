@@ -11,10 +11,12 @@
 \*---------------------------------------------------------*/
 
 #include <cstring>
+#include <chrono>
 #include "QMKDirectController.h"
 #include "StringUtils.h"
 
 QMKDirectController::QMKDirectController(hid_device* dev_handle, const char* path)
+    : heartbeat_running(false)
 {
     dev      = dev_handle;
     location = path;
@@ -35,6 +37,7 @@ QMKDirectController::QMKDirectController(hid_device* dev_handle, const char* pat
 
 QMKDirectController::~QMKDirectController()
 {
+    StopHeartbeatThread();
     DisableDirect();
     hid_close(dev);
 }
@@ -66,11 +69,14 @@ std::string QMKDirectController::GetDeviceName()
 | SendPacket                                                |
 |                                                           |
 |   Sends a 32-byte raw HID packet and reads the response.  |
+|   Thread-safe via dev_mutex.                              |
 |   Returns true if a response was received.                |
 \*---------------------------------------------------------*/
 bool QMKDirectController::SendPacket(unsigned char* data, unsigned int length,
                                      unsigned char* response)
 {
+    std::lock_guard<std::mutex> lock(dev_mutex);
+
     unsigned char packet[QMKD_RAW_EPSIZE + 1];
     memset(packet, 0, sizeof(packet));
 
@@ -251,5 +257,55 @@ void QMKDirectController::SendColors(unsigned char* color_data,
         memcpy(&pkt[3], &color_data[start * 3], batch * 3);
 
         SendPacket(pkt, sizeof(pkt), nullptr);
+    }
+}
+
+/*---------------------------------------------------------*\
+| HeartbeatThreadFunc                                       |
+|                                                           |
+|   Background thread that sends periodic HEARTBEAT packets |
+|   to prevent the firmware from timing out when OpenRGB    |
+|   is idle (no active color updates from the UI).          |
+\*---------------------------------------------------------*/
+void QMKDirectController::HeartbeatThreadFunc(unsigned int interval_ms)
+{
+    while(heartbeat_running.load())
+    {
+        /*-----------------------------------------------------*\
+        | Sleep in short increments so we can exit quickly       |
+        \*-----------------------------------------------------*/
+        for(unsigned int elapsed = 0;
+            elapsed < interval_ms && heartbeat_running.load();
+            elapsed += 100)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        if(heartbeat_running.load())
+        {
+            Heartbeat();
+        }
+    }
+}
+
+void QMKDirectController::StartHeartbeatThread(unsigned int interval_ms)
+{
+    if(heartbeat_running.load())
+    {
+        return;
+    }
+
+    heartbeat_running.store(true);
+    heartbeat_thread = std::thread(&QMKDirectController::HeartbeatThreadFunc,
+                                   this, interval_ms);
+}
+
+void QMKDirectController::StopHeartbeatThread()
+{
+    heartbeat_running.store(false);
+
+    if(heartbeat_thread.joinable())
+    {
+        heartbeat_thread.join();
     }
 }

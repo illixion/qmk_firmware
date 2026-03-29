@@ -383,11 +383,21 @@ void RGBController_QMKDirect::DeviceUpdateLEDs()
     | Enable host-controlled mode on first update.              |
     | Deferred from constructor so the firmware heartbeat timer |
     | doesn't start until we're actually sending color data.    |
+    |                                                           |
+    | Also starts a background heartbeat thread that sends      |
+    | keep-alive packets every 2 seconds, preventing the        |
+    | firmware from timing out when OpenRGB is idle.            |
     \*---------------------------------------------------------*/
     if(!direct_enabled)
     {
         controller->EnableDirect();
         direct_enabled = true;
+
+        unsigned int hb_ms = (timeout_seconds > 0)
+                           ? (timeout_seconds * 1000) / 2
+                           : 2000;
+        if(hb_ms < 500) hb_ms = 500;
+        controller->StartHeartbeatThread(hb_ms);
     }
 
     unsigned int count = (unsigned int)leds.size();
@@ -402,13 +412,6 @@ void RGBController_QMKDirect::DeviceUpdateLEDs()
 
     controller->SendColors(frame_buf, count, max_leds_per_pkt);
     delete[] frame_buf;
-
-    /*---------------------------------------------------------*\
-    | Heartbeat every frame — SET_LEDS already resets the       |
-    | firmware timeout, but an explicit heartbeat provides a    |
-    | safety net if an update cycle takes longer than usual.    |
-    \*---------------------------------------------------------*/
-    controller->Heartbeat();
 }
 
 void RGBController_QMKDirect::UpdateZoneLEDs(int /*zone*/)
