@@ -42,8 +42,7 @@ private:
     unsigned char           matrix_cols;
     unsigned char           max_leds_per_pkt;
     unsigned char           timeout_seconds;
-    unsigned int            heartbeat_counter;
-    unsigned int            heartbeat_interval;
+    bool                    direct_enabled;
 
     std::vector<QMKDirectLEDInfo>   led_info;
 

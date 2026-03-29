@@ -96,8 +96,13 @@ bool QMKDirectController::SendPacket(unsigned char* data, unsigned int length,
     }
     else
     {
+        /*-----------------------------------------------------*\
+        | Fire-and-forget: just drain the response so the HID   |
+        | input buffer doesn't fill up. Short timeout since the |
+        | firmware responds immediately.                        |
+        \*-----------------------------------------------------*/
         unsigned char discard[QMKD_RAW_EPSIZE];
-        hid_read_timeout(dev, discard, sizeof(discard), 100);
+        hid_read_timeout(dev, discard, sizeof(discard), 10);
         return true;
     }
 }

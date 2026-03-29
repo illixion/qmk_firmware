@@ -33,7 +33,7 @@ jobs:
   #---------------------------------------------------------#
   linux:
     name: Linux amd64 AppImage
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout QMK fork
         uses: actions/checkout@v4
@@ -158,7 +158,7 @@ jobs:
   #---------------------------------------------------------#
   macos:
     name: macOS ARM64
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout QMK fork
         uses: actions/checkout@v4
@@ -187,10 +187,41 @@ jobs:
           qmake OpenRGB.pro CONFIG+=release
           make -j$(sysctl -n hw.ncpu)
 
-      - name: Package app bundle
+      - name: Package and sign app bundle
         working-directory: OpenRGB
         run: |
           $(brew --prefix qt@6)/bin/macdeployqt OpenRGB.app
+
+          # Sign all Mach-O binaries inside the bundle, innermost first.
+          # Framework bundles are "ambiguous" to codesign, so we sign
+          # the actual binary inside each (e.g. QtCore.framework/Versions/A/QtCore)
+          # rather than the .framework directory.
+
+          # 1. Standalone dylibs in Frameworks/
+          find OpenRGB.app/Contents/Frameworks -maxdepth 1 -name "*.dylib" | while read lib; do
+            codesign --force --sign - "$lib"
+          done
+
+          # 2. Mach-O binaries inside .framework bundles
+          for fw in OpenRGB.app/Contents/Frameworks/*.framework; do
+            name=$(basename "$fw" .framework)
+            # Qt frameworks use Versions/A/<name> or just <name>
+            for candidate in "$fw/Versions/A/$name" "$fw/Versions/Current/$name" "$fw/$name"; do
+              if [ -f "$candidate" ]; then
+                codesign --force --sign - "$candidate"
+                break
+              fi
+            done
+          done
+
+          # 3. Plugin dylibs
+          find OpenRGB.app/Contents/PlugIns -name "*.dylib" 2>/dev/null | while read plugin; do
+            codesign --force --sign - "$plugin"
+          done
+
+          # 4. Main executable and app bundle
+          codesign --force --sign - OpenRGB.app/Contents/MacOS/OpenRGB
+          codesign --force --sign - OpenRGB.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

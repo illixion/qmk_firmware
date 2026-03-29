@@ -193,8 +193,8 @@ const char* RGBController_QMKDirect::KeycodeToName(unsigned short keycode)
 
 RGBController_QMKDirect::RGBController_QMKDirect(QMKDirectController* controller_ptr)
 {
-    controller        = controller_ptr;
-    heartbeat_counter = 0;
+    controller      = controller_ptr;
+    direct_enabled  = false;
 
     /*---------------------------------------------------------*\
     | Query the device to learn its capabilities                |
@@ -218,9 +218,10 @@ RGBController_QMKDirect::RGBController_QMKDirect(QMKDirectController* controller
     SetupZones();
 
     /*---------------------------------------------------------*\
-    | Enable host-controlled mode on the keyboard               |
+    | Note: EnableDirect() is deferred until the first call to  |
+    | DeviceUpdateLEDs() so that the firmware heartbeat timer   |
+    | only starts when OpenRGB is actually sending color data.  |
     \*---------------------------------------------------------*/
-    controller->EnableDirect();
 }
 
 RGBController_QMKDirect::~RGBController_QMKDirect()
@@ -247,21 +248,6 @@ void RGBController_QMKDirect::QueryDevice()
 
     controller->QueryDeviceInfo(led_count, matrix_rows, matrix_cols,
                                 max_leds_per_pkt, timeout_seconds);
-
-    /*---------------------------------------------------------*\
-    | Calculate heartbeat interval: send heartbeat often enough  |
-    | to stay well within the firmware timeout                  |
-    \*---------------------------------------------------------*/
-    if(timeout_seconds > 0)
-    {
-        /* Assume ~50 LED updates/sec; heartbeat at half the timeout */
-        heartbeat_interval = (timeout_seconds * 50) / 2;
-        if(heartbeat_interval < 10) heartbeat_interval = 10;
-    }
-    else
-    {
-        heartbeat_interval = 100;
-    }
 
     /*---------------------------------------------------------*\
     | LED map — query in batches of 4 until we have them all    |
@@ -393,6 +379,17 @@ void RGBController_QMKDirect::ResizeZone(int /*zone*/, int /*new_size*/)
 
 void RGBController_QMKDirect::DeviceUpdateLEDs()
 {
+    /*---------------------------------------------------------*\
+    | Enable host-controlled mode on first update.              |
+    | Deferred from constructor so the firmware heartbeat timer |
+    | doesn't start until we're actually sending color data.    |
+    \*---------------------------------------------------------*/
+    if(!direct_enabled)
+    {
+        controller->EnableDirect();
+        direct_enabled = true;
+    }
+
     unsigned int count = (unsigned int)leds.size();
     unsigned char* frame_buf = new unsigned char[count * 3];
 
@@ -407,14 +404,11 @@ void RGBController_QMKDirect::DeviceUpdateLEDs()
     delete[] frame_buf;
 
     /*---------------------------------------------------------*\
-    | Periodic heartbeat to keep host-controlled mode alive     |
+    | Heartbeat every frame — SET_LEDS already resets the       |
+    | firmware timeout, but an explicit heartbeat provides a    |
+    | safety net if an update cycle takes longer than usual.    |
     \*---------------------------------------------------------*/
-    heartbeat_counter++;
-    if(heartbeat_counter >= heartbeat_interval)
-    {
-        controller->Heartbeat();
-        heartbeat_counter = 0;
-    }
+    controller->Heartbeat();
 }
 
 void RGBController_QMKDirect::UpdateZoneLEDs(int /*zone*/)
