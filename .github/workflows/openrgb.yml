@@ -65,7 +65,8 @@ jobs:
             libusb-1.0-0-dev \
             libhidapi-dev \
             libmbedtls-dev \
-            pkg-config
+            pkg-config \
+            libfuse2t64
 
       - name: Build OpenRGB
         working-directory: OpenRGB
@@ -73,19 +74,33 @@ jobs:
           qmake OpenRGB.pro CONFIG+=release
           make -j$(nproc)
 
-      - name: Package
-        working-directory: OpenRGB
+      - name: Download linuxdeploy
         run: |
-          mkdir -p release
-          cp openrgb release/
-          cp 60-openrgb.rules release/ 2>/dev/null || true
-          cp README.md release/
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+      - name: Package AppImage
+        working-directory: OpenRGB
+        env:
+          QMAKE: /usr/bin/qmake
+          OUTPUT: OpenRGB-x86_64.AppImage
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp openrgb AppDir/usr/bin/
+          cp qt/org.openrgb.OpenRGB.desktop AppDir/usr/share/applications/
+          cp qt/org.openrgb.OpenRGB.png AppDir/usr/share/icons/hicolor/256x256/apps/
+          ../linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/org.openrgb.OpenRGB.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/org.openrgb.OpenRGB.png \
+            --plugin qt \
+            --output appimage
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: OpenRGB-Linux-amd64-QMKDirect
-          path: OpenRGB/release/
+          path: OpenRGB/OpenRGB-x86_64.AppImage
           retention-days: 30
 
   #---------------------------------------------------------#
