@@ -20,9 +20,14 @@
     <key>KeepAlive</key>
     <true/>
 
+    <!-- /tmp self-cleans (periodic daily removes files untouched for 3 days),
+         and per-event lines are debug-gated, so this normally holds just a
+         startup line + any errors — no record of when password fields were
+         focused. Add --verbose to ProgramArguments (or set DUCKY_DEBUG) to log
+         layout/secure-input transitions while debugging. -->
     <key>StandardOutPath</key>
-    <string>/Users/ixion/Library/Logs/ducky-maclayout.log</string>
+    <string>/tmp/ducky-maclayout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/ixion/Library/Logs/ducky-maclayout.log</string>
+    <string>/tmp/ducky-maclayout.log</string>
 </dict>
 </plist>

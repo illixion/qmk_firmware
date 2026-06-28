@@ -47,6 +47,13 @@ let SECURE_INPUT_POLL_SEC = 0.5
 
 let asWindows = CommandLine.arguments.contains("--win")
 let oneShot = CommandLine.arguments.contains("--oneshot")
+// Per-event lines (layout asserts, secure-input transitions) are gated behind
+// debug: by default the log holds only a startup line and errors, so it never
+// records a timeline of when password fields were focused. --oneshot implies
+// verbose so the manual test tool still prints its result.
+let verbose = CommandLine.arguments.contains("--verbose")
+    || oneShot
+    || ProcessInfo.processInfo.environment["DUCKY_DEBUG"] != nil
 
 // The currently-attached keyboard's raw HID device, if any.
 var currentDevice: IOHIDDevice?
@@ -60,6 +67,13 @@ func log(_ s: String) {
     }
 }
 
+// Debug-only logging. Used for anything that could reveal behavioral data
+// (layout asserts on each attach, secure-input transitions). Silent unless
+// --verbose / --oneshot / DUCKY_DEBUG.
+func vlog(_ s: String) {
+    if verbose { log(s) }
+}
+
 @discardableResult
 func sendCommand(_ device: IOHIDDevice, _ cmd: UInt8, _ value: UInt8, _ what: String) -> Bool {
     var report = [UInt8](repeating: 0, count: REPORT_LEN)
@@ -68,7 +82,7 @@ func sendCommand(_ device: IOHIDDevice, _ cmd: UInt8, _ value: UInt8, _ what: St
     // Report ID 0; IOHIDDeviceSetReport takes the payload WITHOUT a leading id byte.
     let res = IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, 0, report, report.count)
     if res == kIOReturnSuccess {
-        log("\(what): ok")
+        vlog("\(what): ok")
         return true
     }
     log(String(format: "%@: SetReport failed 0x%08X", what, res))
@@ -104,7 +118,7 @@ let matchCallback: IOHIDDeviceCallback = { _, _, _, device in
 }
 let removalCallback: IOHIDDeviceCallback = { _, _, _, device in
     if currentDevice == device { currentDevice = nil }
-    log("keyboard detached")
+    vlog("keyboard detached")
 }
 IOHIDManagerRegisterDeviceMatchingCallback(manager, matchCallback, nil)
 IOHIDManagerRegisterDeviceRemovalCallback(manager, removalCallback, nil)
@@ -134,7 +148,7 @@ let secureInputTimer = Timer(timeInterval: SECURE_INPUT_POLL_SEC, repeats: true)
     let secure = IsSecureEventInputEnabled()
     if secure != privacyActive {
         privacyActive = secure
-        log("secure input \(secure ? "ON" : "off")")
+        vlog("secure input \(secure ? "ON" : "off")")
         if let d = currentDevice {
             sendCommand(d, HOSTCMD_SET_PRIVACY, secure ? 1 : 0,
                         "privacy \(secure ? "blackout" : "normal")")

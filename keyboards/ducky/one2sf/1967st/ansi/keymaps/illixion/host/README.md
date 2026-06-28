@@ -69,12 +69,24 @@ the path if you move the repo or install the binary elsewhere.
 
 # confirm the agent is loaded and running:
 launchctl print gui/$(id -u)/com.illixion.ducky-maclayout | grep -E 'state|pid'
-cat ~/Library/Logs/ducky-maclayout.log
+cat /tmp/ducky-maclayout.log
 
-# real test: unplug/replug -> a fresh "asserted mac layout" line appears instantly
+# real test: unplug/replug -> a fresh "asserted mac layout" line appears (verbose)
 ```
 
 `./ducky-maclayout --win` asserts the Windows layout instead (the default is Mac).
+
+## Logging & privacy
+
+Logs go to `/tmp/ducky-maclayout.log`, which macOS self-cleans (the periodic
+daily job removes `/tmp` files untouched for 3 days). By default only a startup
+line and any errors are written — per-event lines (layout asserts, secure-input
+transitions) are **debug-gated**, so the log never records a timeline of when
+password fields were focused.
+
+Enable the per-event lines while debugging with `--verbose` (add it to the
+plist's `ProgramArguments`) or by setting `DUCKY_DEBUG=1`. `--oneshot` implies
+verbose so the manual test still prints its result.
 
 ## Reload after rebuilding or editing the plist
 ```sh
