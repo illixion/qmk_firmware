@@ -36,6 +36,13 @@
 // Tap settings
 #define TAPPING_TERM 100
 
+// OS detection — macOS enumerates with a longer multi-phase control sequence
+// than Linux/Windows. The default 250ms debounce can latch the early all-0xFF
+// guess (OS_LINUX) before macOS's string-descriptor reads arrive, leaving the
+// board stuck in the swapped (Windows) layout. Widen it so the result settles
+// on OS_MACOS before process_detected_host_os_user reports.
+#define OS_DETECTION_DEBOUNCE 500
+
 // Debounce (ms) — bumped from the 5ms default to suppress switch chatter
 // (e.g. double-firing space). Paired with sym_eager_pk in rules.mk so the
 // press registers instantly; this window only suppresses chatter after it.

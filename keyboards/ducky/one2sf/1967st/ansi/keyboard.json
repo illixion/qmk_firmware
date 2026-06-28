@@ -2,7 +2,7 @@
     "keyboard_name": "One 2 SF ANSI",
     "usb": {
         "pid": "0x07AF",
-        "device_version": "0.0.1"
+        "device_version": "0.0.2"
     },
     "rgb_matrix": {
         "layout": [

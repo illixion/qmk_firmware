@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.illixion.ducky-maclayout</string>
+
+    <!-- Resident Swift daemon. It runs its own IOHIDManager device-matching
+         watcher, so it asserts the layout the instant the keyboard's raw HID
+         collection appears (plug-in, login, post-flash re-enumeration) with no
+         polling and no per-event process spawn. RunAtLoad starts it at login;
+         KeepAlive restarts it if it ever exits. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/ixion/qmk/qmk/keyboards/ducky/one2sf/1967st/ansi/keymaps/illixion/host/ducky-maclayout</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/ixion/Library/Logs/ducky-maclayout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ixion/Library/Logs/ducky-maclayout.log</string>
+</dict>
+</plist>
