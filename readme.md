@@ -1,3 +1,15 @@
+# illixion's QMK fork
+
+This is a personal fork of QMK Firmware. The custom work lives in my keymap for the **Ducky One 2 SF (DKON1967ST, ANSI)**:
+
+➡️ [`keyboards/ducky/one2sf/1967st/ansi/keymaps/illixion/`](keyboards/ducky/one2sf/1967st/ansi/keymaps/illixion/)
+
+Highlights: grave-escape tweaks, host-authoritative Mac/Windows layout, an RGB privacy blackout during macOS secure input, and OpenRGB/QMKD lighting — plus a native macOS companion daemon under [`.../illixion/host/`](keyboards/ducky/one2sf/1967st/ansi/keymaps/illixion/host/). See that keymap's [readme](keyboards/ducky/one2sf/1967st/ansi/keymaps/illixion/readme.md) for details.
+
+Everything below is the upstream QMK README.
+
+---
+
 # THIS IS THE DEVELOP BRANCH
 
 Warning- This is the `develop` branch of QMK Firmware. You may encounter broken code here. Please see [Breaking Changes](https://docs.qmk.fm/#/breaking_changes) for more information.
