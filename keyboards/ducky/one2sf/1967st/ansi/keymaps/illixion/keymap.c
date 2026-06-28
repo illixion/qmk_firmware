@@ -19,6 +19,14 @@ enum custom_keycodes {
 //   0xA1 <1=mac|0=win>
 #define HOSTCMD_SET_LAYOUT 0xA1
 
+// --- Privacy blackout (raw HID) ---
+// macOS engages "secure input" when a password field is focused. The host
+// daemon watches that state and tells the keyboard to black out all LEDs while
+// it's active, so reactive/heatmap RGB effects can't reveal which keys are
+// pressed (e.g. typing a password in public).
+//   0xA2 <1=blackout|0=normal>
+#define HOSTCMD_SET_PRIVACY 0xA2
+
 // --- Mac/Windows layout state ---
 // Single source of truth for the Alt/GUI swap. We track it explicitly instead
 // of reading keymap_config so the toggle never "assumes" a state that OS
@@ -27,6 +35,11 @@ enum custom_keycodes {
 //   mac_layout == false -> Windows: swap Alt<->GUI so keys read Ctrl, Win, Alt
 static bool mac_layout = true;   // default to Mac
 static bool layout_locked = false; // set once the user toggles manually
+
+// --- Privacy blackout state ---
+// When true, all LEDs are forced off every frame, overriding both local effects
+// and host/OpenRGB frames. Driven by the host daemon from macOS secure-input.
+static bool privacy_blackout = false;
 
 static void apply_layout(bool mac) {
     mac_layout = mac;
@@ -58,6 +71,17 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
         return;
     }
 
+    // Privacy blackout toggle — also handled before QMKD so a password-entry
+    // blackout can't be undone by an in-flight OpenRGB frame.
+    if (data[0] == HOSTCMD_SET_PRIVACY) {
+        privacy_blackout = (data[1] != 0);
+        last_matrix_activity_trigger();  // wake the matrix so the change renders now
+        response[0] = HOSTCMD_SET_PRIVACY;
+        response[1] = privacy_blackout ? 1 : 0;
+        raw_hid_send(response, RAW_EPSIZE);
+        return;
+    }
+
     if (!qmkd_process_packet(data, length, response)) {
         response[0] = QMKD_RSP_UNKNOWN;
     }
@@ -76,6 +100,14 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
 }
 
 bool rgb_matrix_indicators_advanced_user(uint8_t led_min, uint8_t led_max) {
+    // Privacy first: when macOS secure input is active, force every LED off and
+    // skip both host frames and local effects so keypresses can't be revealed.
+    if (privacy_blackout) {
+        for (uint8_t i = led_min; i < led_max; i++) {
+            rgb_matrix_set_color(i, 0, 0, 0);
+        }
+        return true;
+    }
     if (qmkd_rgb_matrix_indicator(led_min, led_max)) {
         return true;  // Host is controlling LEDs — skip local effects
     }

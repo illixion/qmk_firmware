@@ -15,13 +15,29 @@ A small resident daemon built on `IOHIDManager`. It registers a device-matching
 callback for the keyboard's vendor raw-HID collection (usage page `0xFF60` /
 usage `0x61`) and asserts the layout **the instant that collection is enumerated
 and openable** — on plug-in, at login if already attached, and on the
-re-enumeration after a firmware flash. No polling, no per-event process spawn,
-native startup (~0 ms), and no Python/`hid`/venv dependency.
+re-enumeration after a firmware flash. No polling for device presence, no
+per-event process spawn, native startup (~0 ms), and no Python/`hid`/venv
+dependency.
 
 Matching only the vendor usage page keeps it off the protected keyboard usage,
 so macOS does not require an Input Monitoring grant. **Confirmed:** the daemon
 runs under launchd and asserts on every attach with no TCC / Input Monitoring
 prompt.
+
+### Privacy blackout on macOS secure input
+
+macOS engages **secure input** (`EnableSecureEventInput`) when a password field
+is focused — that's the OS-level mode that stops apps from observing keystrokes.
+The daemon watches that state and sends the firmware's `HOSTCMD_SET_PRIVACY`
+(`0xA2`) command, which forces **all LEDs off** (overriding both local effects
+*and* host/OpenRGB frames) while it's active, then restores normal RGB when it
+clears. This stops reactive/heatmap effects from revealing which keys you press
+while typing a password — handy in public.
+
+There is no public notification for secure-input changes, so this is the one
+thing that must be polled: a single cheap `IsSecureEventInputEnabled()` call on
+a 0.5 s timer (`SECURE_INPUT_POLL_SEC`). A replug while secure input is active
+re-applies the blackout. **Confirmed** end-to-end (state change → `0xA2` write).
 
 > A previous Python version (`mac_layout_assert.py` + launchd
 > `com.apple.iokit.matching`) also works but was slower: per-event interpreter
@@ -31,7 +47,7 @@ prompt.
 
 ## Build
 ```sh
-swiftc -O ducky-maclayout.swift -o ducky-maclayout -framework Foundation -framework IOKit
+swiftc -O ducky-maclayout.swift -o ducky-maclayout -framework Foundation -framework IOKit -framework Carbon
 ```
 Source is committed; the binary is not — build it locally (it's arch-specific).
 For a portable binary add `-target arm64-apple-macos12` / build a universal
