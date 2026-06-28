@@ -160,7 +160,9 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     switch (keycode) {
         case CMD_ESC_GRV:
             if (record->event.pressed) {
-                if (get_mods() & MOD_MASK_GUI) {
+                // GUI -> grave (Cmd+`), Shift -> grave (which the held Shift
+                // turns into ~), otherwise Esc. Mirrors the Fn1 layer's KC_GRV.
+                if (get_mods() & (MOD_MASK_GUI | MOD_MASK_SHIFT)) {
                     tap_code16(KC_GRV);
                 } else {
                     tap_code16(KC_ESC);
