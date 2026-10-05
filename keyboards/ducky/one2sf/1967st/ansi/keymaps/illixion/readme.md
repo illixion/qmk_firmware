@@ -7,6 +7,7 @@ Custom ANSI keymap with:
 - Full RGB control on layer 2 (Right Fn + Z to toggle, X to cycle modes, C and V to decrease/increase speed, ArrowUp/Down to adjust brightness, ArrowLeft/Right to adjust color)
 - **Mac/Windows layout**: auto OS detection swaps Alt/GUI, with a host-authoritative override for macOS (see below) and a manual toggle on layer 2
 - **Privacy blackout**: RGB turns off while macOS secure input is active (password fields), so reactive effects can't reveal keypresses — driven by the Mac companion in [`host/`](host/)
+- **[FocusGuard](https://github.com/illixion/MacVD-FocusGuard) support** (`fg/`): a per-key LED API (`host/kbled`) and an authenticated, encrypted keystroke relay that lets FocusGuard keep typing into password fields while Apple Vision Pro's Mac Virtual Display holds the keyboard — see [FocusGuard](#focusguard) below
 - **OpenRGB / Aurora support**: Universal host-controlled lighting via the QMK Direct Protocol (QMKD), compatible with OpenRGB, Aurora RGB, and any QMKD-aware host
 
 ## Mac/Windows layout
@@ -40,6 +41,52 @@ reliably detect over USB, so it tells the keyboard via raw HID:
 It uses `IOHIDManager` on the vendor raw usage page (no Input Monitoring grant
 needed) and needs no Python dependency. Build/install/uninstall steps are in
 [`host/README.md`](host/README.md).
+
+## FocusGuard
+
+[FocusGuard](https://github.com/illixion/MacVD-FocusGuard) is a Mac menu bar app that keeps you typing
+when Apple Vision Pro's Mac Virtual Display takes the keyboard away: it reads your keys and
+re-types them into the Mac app you were using. macOS hides keystrokes from every app while a
+password field is focused (Secure Event Input), so for those this firmware relays the keys
+itself, over its vendor HID interface, in an authenticated and encrypted stream. FocusGuard
+works without this firmware; only password fields need it. The firmware also handles
+FocusGuard's passthrough key (Fn1+Backspace) and its indicator.
+
+### Setting up the relay
+
+1. Install FocusGuard to `~/Applications/FocusGuard.app` (`./build.sh --install` in its repo)
+   and grant its permissions.
+2. Create the device key, once: `tools/fg-provision.sh`. It stores 256 random bits in your
+   login Keychain (`com.illixion.focusguard.keyboard`), readable by FocusGuard only.
+3. Build and flash with the key: `tools/fg-flash.sh`. It reads the key from the Keychain
+   (approve the prompt), builds in a private temporary directory, asks you to put the keyboard
+   in bootloader mode, flashes, and deletes every build file.
+
+The key exists only in the Keychain and in the keyboard. No file in this repo holds it, so
+the clone is safe to share; a plain `qmk compile` builds the same firmware with the relay
+compiled out. To replace the key: `tools/fg-provision.sh --rotate`, then `tools/fg-flash.sh`.
+
+### What you see
+
+While the relay is open, which FocusGuard does only while visionOS holds the keyboard
+**and** a password field is focused:
+
+- **The whole keyboard pulses red**, with Esc solid red. It is drawn over every effect,
+  including the privacy blackout, so nothing can hide it.
+- **Your keys reach only the relay**, not the Mac's normal keyboard input. A relay opened by
+  anything other than FocusGuard is impossible to miss: typing simply stops working.
+- **Esc closes it.** The Esc still goes through (it cancels a pinentry prompt), the relay ends,
+  and the keyboard refuses a new one for 10 s. FocusGuard won't reopen it for the same
+  password prompt.
+
+It also closes by itself 3 s after FocusGuard stops sending its authenticated heartbeat, and
+after 15 minutes at most. Wire format and threat model: [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+
+### Per-key LEDs
+
+`host/kbled` (symlink it onto your `PATH`) pins colours to keys from the Mac, drawn over every
+animation and OpenRGB frame, optionally with a TTL — for status lights without driving the whole
+animation from the Mac. `kbled help` lists the commands.
 
 ## QMK Direct Protocol (QMKD)
 
@@ -137,8 +184,13 @@ The bridge auto-detects QMKD v1 firmware and queries LED count and timing from t
     cargo install nu-isp-cli
     qmk compile -kb ducky/one2sf/1967st/ansi -km illixion
 
+This builds without the FocusGuard relay key; use `tools/fg-flash.sh` for a build with it (see
+[FocusGuard](#focusguard)).
+
 ## Flash
 
 Hold D+L while plugging in the keyboard to enter bootloader mode, then:
 
     nu-isp-cli flash ducky_one2sf_1967st_ansi_illixion.bin
+
+`tools/fg-flash.sh` does this step itself.

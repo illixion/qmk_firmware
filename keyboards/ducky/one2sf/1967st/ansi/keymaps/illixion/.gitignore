@@ -1,0 +1,4 @@
+# Older builds kept the device key in this file. Keys now live only in the Keychain
+# (tools/fg-flash.sh); the firmware refuses to build while it exists. Never commit it.
+fg/fg_secret.h
+host/kbled

@@ -108,3 +108,19 @@ rm ~/Library/LaunchAgents/com.illixion.ducky-maclayout.plist
   so no wake hook is needed — only attach events matter.
 - Manual override still works: the `MACWIN_TOGG` key flips the layout by hand at
   any time (it also sets `layout_locked`).
+
+## `kbled` — pin a colour to any key
+
+```sh
+swiftc -O kbled.swift -o kbled -framework Foundation -framework IOKit
+./kbled set esc,a,lshift red --ttl 60     # until reset, or 60 s
+./kbled set all off                       # cover the whole board
+./kbled reset esc                         # one key back to the animation
+./kbled reset --all
+./kbled list                              # LED index, matrix position, key name
+./kbled status                            # protocol version, overrides, relay state
+```
+Colours: names, `RRGGBB`, `#RRGGBB` or `r,g,b`. Overrides are firmware-side and RAM-only; they
+sit above every animation and OpenRGB frame, so a status tracker can set a key once instead of
+driving the animation. See [`../docs/PROTOCOL.md`](../docs/PROTOCOL.md).
+
