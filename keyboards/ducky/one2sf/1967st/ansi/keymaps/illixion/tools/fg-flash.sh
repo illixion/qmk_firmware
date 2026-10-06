@@ -37,7 +37,8 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 mkdir "$WORK/key" "$WORK/build"
 
-echo "Reading the device key from the Keychain (approve the prompt)…"
+echo "Reading the device key from the Keychain. Choose Allow, NOT Always Allow: \"Always\" lets"
+echo "every process read the key silently through the security tool."
 if ! key="$(security find-generic-password -s "$SERVICE" -a "$ACCOUNT" -w 2>/dev/null)"; then
     echo "FAIL: no key in the Keychain ($SERVICE / $ACCOUNT), or access was denied. Run tools/fg-provision.sh first." >&2
     exit 1
@@ -74,6 +75,20 @@ echo "Built $(wc -c < "$BIN" | tr -d ' ') bytes with the key."
 
 echo
 echo "Put the keyboard in ISP mode: unplug it, hold D+L, plug it back in."
-read -r -p "Press Return when it is ready (Ctrl-C to cancel)… " _
+# `nu-isp-cli info` only reads the bootloader's identity, and fails at once while none is
+# attached, so poll it until the keyboard shows up in ISP mode.
+WAIT_S="${FG_FLASH_WAIT:-180}"
+printf "Waiting for the bootloader (up to %ss, Ctrl-C to cancel)…" "$WAIT_S"
+deadline=$((SECONDS + WAIT_S))
+until nu-isp-cli info >/dev/null 2>&1; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+        echo
+        echo "FAIL: no keyboard in bootloader mode after ${WAIT_S}s. Nothing was flashed." >&2
+        exit 1
+    fi
+    sleep 0.5
+done
+echo " found."
+sleep 0.5      # let the bootloader settle after the probe's connect
 nu-isp-cli flash "$BIN"
 echo "OK: flashed. The build directory with the key has been deleted."

@@ -59,8 +59,9 @@ FocusGuard's passthrough key (Fn1+Backspace) and its indicator.
 2. Create the device key, once: `tools/fg-provision.sh`. It stores 256 random bits in your
    login Keychain (`com.illixion.focusguard.keyboard`), readable by FocusGuard only.
 3. Build and flash with the key: `tools/fg-flash.sh`. It reads the key from the Keychain
-   (approve the prompt), builds in a private temporary directory, asks you to put the keyboard
-   in bootloader mode, flashes, and deletes every build file.
+   (choose **Allow**, not *Always Allow*), builds in a private temporary directory, waits for the keyboard to show
+   up in bootloader mode (unplug it, hold D+L, plug it back in), flashes, and deletes every
+   build file.
 
 The key exists only in the Keychain and in the keyboard. No file in this repo holds it, so
 the clone is safe to share; a plain `qmk compile` builds the same firmware with the relay
